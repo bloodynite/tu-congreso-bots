@@ -1,0 +1,53 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Archivos de compilación Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos de IDE y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos de configuración local
+.env
+local_settings.py
+
+# Archivos de base de datos local
+*.sqlite3
+*.db
+
+# Directorios de dependencias y build
+build/
+dist/
+*.egg-info/
+
+# Logs y archivos temporales
+*.log
+*.pid
+*.cache
+
+# Directorios de documentación
+docs/_build/
+
+# Archivos de Jupyter Notebook
+.ipynb_checkpoints/
+
+# Archivos de pytest
+.pytest_cache/
+
+# Archivos de cobertura
+.coverage
+htmlcov/
+
+# Configuración específica de Supabase (si existe)
+supabase/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
