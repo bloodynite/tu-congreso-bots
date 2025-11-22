@@ -1,65 +1,69 @@
 import requests
 import os
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class APIHelper:
     def __init__(self):
-        self.api_url = os.getenv('API_URL')
+        self.api_url = os.getenv('API_URL', 'https://www.senado.cl/_next/data/2nIj_T31TxUMBaXNPeOA5/senadoras-y-senadores/listado-de-senadoras-y-senadores.json')
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
     
+    def get_api_url(self):
+        """Obtiene la URL configurada de la API"""
+        return self.api_url
+    
     def fetch_parlamentarios_data(self):
-        """Obtiene los datos de la API del Senado"""
+        """Obtiene ambos conjuntos de datos de la API"""
         try:
-            print(f"🔍 Conectando a: {self.api_url}")
             response = requests.get(self.api_url, headers=self.headers, timeout=30)
             response.raise_for_status()
-            
             data = response.json()
             
-            # Navegar por la estructura JSON para encontrar los parlamentarios
-            page_props = data.get('pageProps', {})
-            components = page_props.get('resource', {}).get('components', [])
+            result = {'cargos': [], 'parlamentarios': []}
+            components = data.get('pageProps', {}).get('resource', {}).get('components', [])
             
-            # Buscar el componente que contiene los parlamentarios
             for component in components:
                 if component.get('type') == 'paragraph--component_api_reference':
-                    computed_components = component.get('computedComponents', {})
-                    if 'data' in computed_components and 'parlamentarios' in computed_components['data']:
-                        parlamentarios_data = computed_components['data']['parlamentarios']
-                        return parlamentarios_data.get('data', [])
+                    computed = component.get('computedComponents', {})
+                    
+                    # Primer componente: Presidente/Vicepresidente
+                    if computed.get('data', {}).get('data') and not computed.get('data', {}).get('parlamentarios'):
+                        result['cargos'] = computed['data']['data']
+                    
+                    # Segundo componente: Parlamentarios
+                    elif computed.get('data', {}).get('parlamentarios'):
+                        result['parlamentarios'] = computed['data']['parlamentarios']['data']
             
-            print("❌ No se encontraron datos de parlamentarios en la respuesta")
-            return []
+            return result
             
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Error de conexión: {e}")
-            return []
         except Exception as e:
-            print(f"❌ Error procesando datos: {e}")
-            return []
+            print(f"❌ Error obteniendo datos: {str(e)}")
+            return {'cargos': [], 'parlamentarios': []}
     
     def process_parlamentario_data(self, raw_data):
-        """Procesa y limpia los datos de un parlamentario"""
+        """Procesa datos de parlamentario manteniendo estructura original"""
         try:
-            # Asegurar que los campos anidados estén en formato correcto
-            processed = raw_data.copy()
-            
-            # Convertir comité a JSON string si es un diccionario
-            comite = processed.get('COMITE')
-            if comite and isinstance(comite, dict):
-                processed['COMITE'] = comite
-            
-            # Convertir períodos a JSON string si es una lista
-            periodos = processed.get('PERIODOS')
-            if periodos and isinstance(periodos, list):
-                processed['PERIODOS'] = periodos
-            
+            if not raw_data or not raw_data.get('UUID'):
+                print("⚠️ Datos inválidos - Falta UUID")
+                return None
+                
+            # Conservar todos los campos originales
+            processed = {
+                'UUID': raw_data['UUID'],
+                'SLUG': raw_data.get('SLUG', ''),  # Mantener string vacío si no existe
+                'NOMBRE': raw_data.get('NOMBRE', ''),
+                'APELLIDO_PATERNO': raw_data.get('APELLIDO_PATERNO', ''),
+                'APELLIDO_MATERNO': raw_data.get('APELLIDO_MATERNO', ''),
+                'NOMBRE_COMPLETO': raw_data.get('NOMBRE_COMPLETO', ''),
+                'PERIODOS': raw_data.get('PERIODOS', []),
+                'COMITE': raw_data.get('COMITE', [])
+            }
             return processed
             
         except Exception as e:
-            print(f"Error procesando datos del parlamentario: {e}")
-            return raw_data
+            print(f"❌ Error procesando datos: {str(e)}")
+            return None

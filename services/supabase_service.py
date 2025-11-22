@@ -5,6 +5,7 @@ import psycopg2
 from psycopg2 import sql
 from typing import List, Dict, Any
 import uuid
+import time
 
 class SupabaseService:
     def __init__(self):
@@ -103,8 +104,6 @@ class SupabaseService:
 
     def insert_parlamentario(self, parlamentario_data):
         """Inserta o actualiza un parlamentario en la BD con sus relaciones"""
-        conn = None
-        cursor = None
         try:
             # Iniciar una transacción
             conn = self.db.get_connection()
@@ -125,11 +124,6 @@ class SupabaseService:
                 print(f"⚠️ Skipping parlamentario {data.get('NOMBRE_COMPLETO')} - Invalid UUID: {uuid_value}")
                 return False
             
-            # 1. Check if parlamentario exists usando UUID como identificador único
-            check_query = "SELECT id FROM parlamentarios WHERE uuid = %s"
-            cursor.execute(check_query, (data.get('UUID'),))
-            existing = cursor.fetchone()
-
             # Procesar el nombre completo para dividirlo en nombre y apellidos
             nombre_completo = data.get('NOMBRE_COMPLETO', '')
             apellidos = ''
@@ -142,58 +136,10 @@ class SupabaseService:
             apellido_paterno = apellidos.split()[0] if apellidos else ''
             apellido_materno = ' '.join(apellidos.split()[1:]) if apellidos and len(apellidos.split()) > 1 else ''
 
-            if existing:
-                # UPDATE existing parlamentario
-                query = """
-                UPDATE parlamentarios SET
-                    id_parlamentario = %(id_parlamentario)s,
-                    slug = %(slug)s,
-                    nombre = %(nombre)s,
-                    apellido_paterno = %(apellido_paterno)s,
-                    apellido_materno = %(apellido_materno)s,
-                    camara = %(camara)s,
-                    partido_id = %(partido_id)s,
-                    partido = %(partido)s,
-                    circunscripcion_id = %(circunscripcion_id)s,
-                    region = %(region)s,
-                    region_id = %(region_id)s,
-                    fono = %(fono)s,
-                    email = %(email)s,
-                    sexo = %(sexo)s,
-                    imagen = %(imagen)s,
-                    imagen_120 = %(imagen_120)s,
-                    imagen_450 = %(imagen_450)s,
-                    imagen_600 = %(imagen_600)s,
-                    nombre_completo = %(nombre_completo)s,
-                    sexo_etiqueta = %(sexo_etiqueta)s,
-                    sexo_etiqueta_abreviatura = %(sexo_etiqueta_abreviatura)s,
-                    updated_at = NOW()
-                WHERE uuid = %(uuid)s
-                RETURNING id
-                """
-                parlamentario_id = existing[0]
-            else:
-                # INSERT new parlamentario
-                query = """
-                INSERT INTO parlamentarios (
-                    id_parlamentario, uuid, slug, nombre, apellido_paterno, apellido_materno,
-                    camara, partido_id, partido, circunscripcion_id, region, region_id,
-                    fono, email, sexo, imagen, imagen_120, imagen_450, imagen_600,
-                    nombre_completo, sexo_etiqueta, sexo_etiqueta_abreviatura
-                ) VALUES (
-                    %(id_parlamentario)s, %(uuid)s, %(slug)s, %(nombre)s, %(apellido_paterno)s, 
-                    %(apellido_materno)s, %(camara)s, %(partido_id)s, %(partido)s, 
-                    %(circunscripcion_id)s, %(region)s, %(region_id)s, %(fono)s, %(email)s, 
-                    %(sexo)s, %(imagen)s, %(imagen_120)s, %(imagen_450)s, %(imagen_600)s,
-                    %(nombre_completo)s, %(sexo_etiqueta)s, %(sexo_etiqueta_abreviatura)s
-                )
-                RETURNING id
-                """
-            
             params = {
                 'id_parlamentario': data.get('ID_PARLAMENTARIO'),
                 'uuid': data.get('UUID'),
-                'slug': data.get('SLUG', '').lower(),
+                'slug': data.get('SLUG', '').lower(),  # Mantener string vacío si no hay slug
                 'nombre': nombre,
                 'apellido_paterno': apellido_paterno,
                 'apellido_materno': apellido_materno,
@@ -215,15 +161,70 @@ class SupabaseService:
                 'sexo_etiqueta_abreviatura': data.get('SEXO_ETIQUETA_ABREVIATURA', '')
             }
             
-            # Ejecutar la consulta
-            print(f"🚀 Ejecutando consulta:\n{query}\nCon parámetros:\n{params}")
-            cursor.execute(query, params)
-            result = cursor.fetchone()
+            # Verificar existencia usando parámetros nombrados consistentemente
+            cursor.execute("""
+            SELECT id FROM parlamentarios 
+            WHERE uuid = %(uuid)s OR id_parlamentario = %(id_parlamentario)s
+            """, params)
+            existing = cursor.fetchone()
+
+            if existing:
+                # UPDATE completo si existe
+                update_query = """
+                UPDATE parlamentarios SET
+                    slug = %(slug)s,
+                    nombre = %(nombre)s,
+                    apellido_paterno = %(apellido_paterno)s,
+                    apellido_materno = %(apellido_materno)s,
+                    camara = %(camara)s,
+                    partido_id = %(partido_id)s,
+                    partido = %(partido)s,
+                    circunscripcion_id = %(circunscripcion_id)s,
+                    region = %(region)s,
+                    region_id = %(region_id)s,
+                    fono = %(fono)s,
+                    email = %(email)s,
+                    sexo = %(sexo)s,
+                    imagen = %(imagen)s,
+                    imagen_120 = %(imagen_120)s,
+                    imagen_450 = %(imagen_450)s,
+                    imagen_600 = %(imagen_600)s,
+                    nombre_completo = %(nombre_completo)s,
+                    sexo_etiqueta = %(sexo_etiqueta)s,
+                    sexo_etiqueta_abreviatura = %(sexo_etiqueta_abreviatura)s,
+                    updated_at = NOW()
+                WHERE id = %(id)s
+                RETURNING id
+                """
+                cursor.execute(update_query, {**params, 'id': existing[0]})
+                result = cursor.fetchone()
+                if not result:
+                    raise Exception("No se pudo obtener ID después de INSERT/UPDATE")
+                parlamentario_id = result[0]
+            else:
+                # INSERT si no existe
+                insert_query = """
+                INSERT INTO parlamentarios (
+                    id_parlamentario, uuid, slug, nombre, apellido_paterno, apellido_materno,
+                    camara, partido_id, partido, circunscripcion_id, region, region_id,
+                    fono, email, sexo, imagen, imagen_120, imagen_450, imagen_600,
+                    nombre_completo, sexo_etiqueta, sexo_etiqueta_abreviatura
+                ) VALUES (
+                    %(id_parlamentario)s, %(uuid)s, %(slug)s, %(nombre)s, %(apellido_paterno)s, 
+                    %(apellido_materno)s, %(camara)s, %(partido_id)s, %(partido)s, 
+                    %(circunscripcion_id)s, %(region)s, %(region_id)s, %(fono)s, %(email)s, 
+                    %(sexo)s, %(imagen)s, %(imagen_120)s, %(imagen_450)s, %(imagen_600)s,
+                    %(nombre_completo)s, %(sexo_etiqueta)s, %(sexo_etiqueta_abreviatura)s
+                )
+                RETURNING id
+                """
+                cursor.execute(insert_query, params)
+                result = cursor.fetchone()
+                if not result:
+                    raise Exception("No se pudo obtener ID después de INSERT/UPDATE")
+                parlamentario_id = result[0]
             
-            if not result:
-                raise Exception("No se pudo insertar el parlamentario")
-            
-            parlamentario_id = result[0]
+            print(f"✅ Parlamentario {nombre_completo} insertado/actualizado correctamente (ID: {parlamentario_id})")
             
             # 2. Procesar comités si existen
             comites = data.get('COMITE', [])
@@ -242,7 +243,6 @@ class SupabaseService:
                     
                 comite_uuid = comite.get('UUID')
                 if not comite_uuid or comite_uuid.lower() == 'uuid':
-                    print(f"⚠️ Usando NULL para UUID de comité {comite.get('NOMBRE')} - Valor inválido: {comite_uuid}")
                     comite_uuid = None
                     
                 # Verificar si la constraint ya existe primero
@@ -258,8 +258,12 @@ class SupabaseService:
                     UNIQUE (id_comite)
                     """)
                     
-                # Luego insertar/actualizar
-                query_comite = """
+                # Insertar o actualizar el comité (sin log de UUID inválido)
+                comite_uuid = comite.get('UUID')
+                if not comite_uuid or comite_uuid.lower() == 'uuid':
+                    comite_uuid = None
+                    
+                cursor.execute("""
                 INSERT INTO comites (id_comite, uuid, nombre, abreviatura)
                 VALUES (%(id_comite)s, %(uuid)s, %(nombre)s, %(abreviatura)s)
                 ON CONFLICT (id_comite) DO UPDATE SET
@@ -267,26 +271,29 @@ class SupabaseService:
                     abreviatura = EXCLUDED.abreviatura,
                     uuid = COALESCE(EXCLUDED.uuid, comites.uuid)
                 RETURNING id
-                """
-                cursor.execute(query_comite, {
-                    'id_comite': comite_id,
+                """, {
+                    'id_comite': comite.get('ID'),
                     'uuid': comite_uuid,
                     'nombre': comite.get('NOMBRE'),
                     'abreviatura': comite.get('ABREVIATURA')
                 })
                 comite_result = cursor.fetchone()
-                
                 if comite_result:
                     comite_id = comite_result[0]
                     
                     # Insertar la relación parlamentario-comité
                     query_relacion = """
                     INSERT INTO parlamentario_comite (parlamentario_id, comite_id)
-                    VALUES (%s, %s)
+                    VALUES (%(parlamentario_id)s, %(comite_id)s)
                     ON CONFLICT (parlamentario_id, comite_id) DO NOTHING
                     """
-                    print(f"🚀 Ejecutando consulta:\n{query_relacion}\nCon parámetros:\n{(parlamentario_id, comite_id)}")
-                    cursor.execute(query_relacion, (parlamentario_id, comite_id))
+                    cursor.execute(query_relacion, {
+                        'parlamentario_id': parlamentario_id,
+                        'comite_id': comite_id
+                    })
+                else:
+                    print("⚠️ No se pudo obtener ID del comité")
+                    continue
             
             # 3. Procesar períodos si existen
             periodos = data.get('PERIODOS', [])
@@ -297,47 +304,41 @@ class SupabaseService:
                 if not periodo:
                     continue
                 
-                # Manejar UUID inválido (0 o vacío)
+                # Manejar UUID inválido sin log
                 periodo_uuid = periodo.get('UUID')
                 if not periodo_uuid or str(periodo_uuid) == '0':
-                    print(f"⚠️ Usando NULL para UUID de período {periodo.get('DESDE')}-{periodo.get('HASTA')}")
                     periodo_uuid = None
                 
-                # Insertar/actualizar período (sin referencia a parlamentario)
+                # Insertar/actualizar período (único por id_periodo + camara)
                 query_periodo = """
                 INSERT INTO periodos (
-                    id_periodo, uuid, camara, desde, hasta, vigente
+                    parlamentario_id, id_periodo, camara,
+                    desde, hasta, vigente
                 ) VALUES (
-                    %(id_periodo)s, %(uuid)s, %(camara)s, %(desde)s, %(hasta)s, %(vigente)s
-                ) ON CONFLICT (id_periodo) DO UPDATE SET
-                    uuid = COALESCE(EXCLUDED.uuid, periodos.uuid),
-                    camara = EXCLUDED.camara,
+                    %(parlamentario_id)s, %(id_periodo)s, %(camara)s,
+                    %(desde)s, %(hasta)s, %(vigente)s
+                ) ON CONFLICT (parlamentario_id, id_periodo, camara) 
+                DO UPDATE SET
                     desde = EXCLUDED.desde,
                     hasta = EXCLUDED.hasta,
                     vigente = EXCLUDED.vigente
-                RETURNING id
                 """
                 cursor.execute(query_periodo, {
+                    'parlamentario_id': parlamentario_id,
                     'id_periodo': periodo.get('ID'),
-                    'uuid': periodo_uuid,
-                    'camara': periodo.get('CAMARA'),
+                    'camara': periodo.get('CAMARA', 'S'),
                     'desde': periodo.get('DESDE'),
                     'hasta': periodo.get('HASTA'),
-                    'vigente': bool(periodo.get('VIGENTE', 0))
+                    'vigente': bool(periodo.get('VIGENTE', False))
                 })
-                periodo_id = cursor.fetchone()[0]
-                
-                # Insertar relación en tabla intermedia
-                query_relacion = """
-                INSERT INTO parlamentario_periodo (parlamentario_id, periodo_id)
-                VALUES (%s, %s)
-                ON CONFLICT (parlamentario_id, periodo_id) DO NOTHING
-                """
-                cursor.execute(query_relacion, (parlamentario_id, periodo_id))
+            
+            # Procesar cargos del senado si existen
+            if 'computedComponents' in parlamentario_data:
+                self.procesar_cargos_senado(parlamentario_data['computedComponents'])
             
             # Confirmar la transacción
             conn.commit()
-            print(f"✅ Parlamentario {nombre_completo} insertado/actualizado correctamente (ID: {parlamentario_id})")
+            
             return True
             
         except Exception as e:
@@ -353,6 +354,77 @@ class SupabaseService:
                 cursor.close()
             if conn and not conn.closed:
                 conn.close()
+
+    def procesar_cargos_senado(self, computed_components: dict):
+        """Procesa cargos directivos con transacciones robustas"""
+        try:
+            # Validación inicial de datos
+            if computed_components is None:
+                print("⚠️ No hay datos de cargos (None recibido)")
+                return
+                
+            if 'data' not in computed_components:
+                print("⚠️ Estructura inválida: falta clave 'data'")
+                return
+                
+            cargos_data = computed_components['data'].get('data', [])
+            if not cargos_data:
+                print("⚠️ No hay datos en 'data.data'")
+                return
+                
+            print(f"📝 Procesando {len(cargos_data)} cargos directivos")
+            
+            # Obtener conexión y cursor
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            
+            for cargo in cargos_data:
+                try:
+                    # Validar campos obligatorios
+                    required_fields = ['UUID', 'CARGO', 'NOMBRE', 'INICIO']
+                    if not all(field in cargo for field in required_fields):
+                        print(f"⚠️ Cargo incompleto. Faltan: {[f for f in required_fields if f not in cargo]}")
+                        continue
+                        
+                    # Determinar tipo de cargo (1: Presidente, 2: Vicepresidente)
+                    tipo_cargo = 1 if cargo['CARGO'] == 'Presidente' else 2
+                    es_actual = cargo.get('TERMINO') is None
+                    
+                    query = """
+                    INSERT INTO historico_cargos_senado (
+                        parlamentario_uuid, tipo_cargo_id,
+                        fecha_inicio, fecha_termino, es_actual
+                    ) VALUES (
+                        %s, %s, TO_DATE(%s, 'DD/MM/YYYY'), %s, %s
+                    ) ON CONFLICT ON CONSTRAINT unique_cargo_parlamentario
+                    DO UPDATE SET
+                        fecha_termino = EXCLUDED.fecha_termino,
+                        es_actual = EXCLUDED.es_actual
+                    """
+                    
+                    params = (
+                        cargo['UUID'],
+                        tipo_cargo,
+                        cargo['INICIO'],
+                        cargo.get('TERMINO'),
+                        es_actual
+                    )
+                    
+                    cursor.execute(query, params)
+                    print(f"✅ {cargo['CARGO']} procesado: {cargo['NOMBRE']} (filas afectadas: {cursor.rowcount})")
+                    
+                except Exception as e:
+                    conn.rollback()
+                    print(f"❌ Error procesando cargo {cargo.get('CARGO', 'desconocido')}: {str(e)}")
+                    continue
+            
+            conn.commit()
+            cursor.close()
+            
+        except Exception as e:
+            print(f"❌ Error general procesando cargos: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def get_existing_uuids(self) -> set:
         """Obtiene todos los UUID existentes en la BD para verificación rápida"""

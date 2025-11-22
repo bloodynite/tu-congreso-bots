@@ -72,6 +72,18 @@ class Database:
                 cursor.close()
             conn.commit()
     
+    def insert_parlamentario(self, data):
+        """Inserta parlamentario con validación de slug"""
+        if not data.get('slug'):
+            data['slug'] = f"parlamentario-{data['UUID'][:8]}"  # Slug fallback
+        
+        query = """
+        INSERT INTO parlamentarios (...) 
+        VALUES (...)
+        ON CONFLICT (slug) DO UPDATE SET ...
+        """
+        # Resto del código...
+    
     def close(self):
         """Cierra la conexión a la base de datos"""
         if hasattr(self, 'connection') and self.connection and not self.connection.closed:
